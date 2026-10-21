@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#1B2F6E">
+  <title>Pulse Admin</title>
+  <link rel="icon" href="https://www.pulseio.in/favicon-32x32.png">
+  <link rel="preconnect" href="https://vyknmwrcvfnpbcrjugik.supabase.co">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+  <!-- Sign in -->
+  <main id="authView" class="auth" hidden>
+    <form id="loginForm" class="auth-card" autocomplete="on">
+      <img src="https://www.pulseio.in/image/pulse-logo.png" alt="Pulse" class="logo">
+      <h1>Admin sign in</h1>
+      <p class="muted">Manage products, website content and leads for pulseio.in.</p>
+      <label for="lEmail">Email</label><input id="lEmail" type="email" autocomplete="username" required>
+      <label for="lPass">Password</label><input id="lPass" type="password" autocomplete="current-password" required>
+      <button class="btn block" id="lBtn" type="submit">Sign in</button>
+      <button class="link" type="button" id="forgot">Forgot password?</button>
+      <p class="err" id="lErr" role="alert"></p>
+    </form>
+  </main>
+
+  <!-- Set new password (from email link) -->
+  <main id="resetView" class="auth" hidden>
+    <form id="resetForm" class="auth-card">
+      <img src="https://www.pulseio.in/image/pulse-logo.png" alt="Pulse" class="logo">
+      <h1>Set a new password</h1>
+      <label for="rp1">New password</label><input id="rp1" type="password" autocomplete="new-password" minlength="10" required>
+      <label for="rp2">Type it again</label><input id="rp2" type="password" autocomplete="new-password" minlength="10" required>
+      <button class="btn block" type="submit">Save password</button>
+      <p class="err" id="rErr" role="alert"></p>
+    </form>
+  </main>
+
+  <!-- Signed in but not an admin -->
+  <main id="denyView" class="auth" hidden>
+    <div class="auth-card">
+      <img src="https://www.pulseio.in/image/pulse-logo.png" alt="Pulse" class="logo">
+      <h1>No admin access</h1>
+      <p class="muted">You're signed in as <b id="denyEmail"></b>, but this account isn't an admin yet. Ask an existing admin to turn on access for you under <b>Team &amp; Access</b>.</p>
+      <button class="btn block" id="denyOut" type="button">Sign out</button>
+    </div>
+  </main>
+
+  <!-- App -->
+  <div id="appView" class="app" hidden>
+    <aside class="side">
+      <div class="brand"><img src="https://www.pulseio.in/image/pulse-logo.png" alt="Pulse"><span>Admin</span></div>
+      <nav id="nav" aria-label="Main"></nav>
+      <div class="me"><b id="meName"></b><small id="meEmail"></small></div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+    <div class="content">
+      <div class="topbar"><button class="icon-btn" id="menuBtn" aria-label="Open menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button><img src="https://www.pulseio.in/image/pulse-logo.png" alt="Pulse" class="tlogo"></div>
+      <main id="main" class="main" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <dialog id="drawer" class="drawer"><button class="icon-btn close" id="dClose" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button><div id="dBody"></div></dialog>
+  <dialog id="confirm" class="confirm"><h3 id="cTitle"></h3><p id="cText" class="muted"></p><div class="row end"><button class="btn ghost" id="cCancel">Cancel</button><button class="btn danger-solid" id="cOk">Delete</button></div></dialog>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/resources.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
