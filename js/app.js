@@ -597,25 +597,100 @@
   $("#drawer").addEventListener("click", (e) => { if (e.target.id === "drawer") $("#drawer").close(); });
 
   /* ---------- team ---------- */
+  const teamApi = async (body) => {
+    const { data, error } = await sb.functions.invoke("team-admin", { body });
+    if (error) {
+      let msg = error.message;
+      try { const j = await error.context.json(); if (j?.error) msg = j.error; } catch (_) {}
+      throw new Error(msg);
+    }
+    return data;
+  };
+  const loginText = (email, pw) => `Pulse Admin login\nLink: ${location.origin}/\nEmail: ${email}\nTemporary password: ${pw}\nPlease change it after you sign in (Team & Access → Your password).`;
+  function showLogin(title, email, pw) {
+    const d = $("#drawer");
+    $("#dBody").innerHTML = `<h2>${esc(title)}</h2>
+      <p class="muted">Share these details with them privately. The password is shown only once.</p>
+      <div class="msg" id="loginBox">${esc(loginText(email, pw))}</div>
+      <div class="act"><button class="btn" id="cpLogin" type="button">Copy login details</button>
+      <a class="btn ghost" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(loginText(email, pw))}">${icon("wa")} Send on WhatsApp</a></div>`;
+    $("#cpLogin").onclick = async () => { try { await navigator.clipboard.writeText(loginText(email, pw)); toast("Copied"); } catch (_) { toast("Select the text and copy it", "err"); } };
+    if (!d.open) d.showModal();
+  }
+  function addMemberForm(onDone) {
+    const d = $("#drawer");
+    $("#dBody").innerHTML = `<h2>Add team member</h2>
+      <p class="muted">Creates their login straight away. No email is sent.</p>
+      <form id="addForm" class="stack">
+        <div class="field"><label for="tmName">Full name</label><input id="tmName" autocomplete="off" placeholder="e.g. Yogesh Kumar"></div>
+        <div class="field"><label for="tmEmail">Email <i class="req">*</i></label><input id="tmEmail" type="email" required autocomplete="off" placeholder="name@pulseio.in"></div>
+        <label class="switch"><input type="checkbox" id="tmAdmin" checked><span></span>Give admin access now</label>
+        <p class="err" id="tmErr" role="alert"></p>
+        <button class="btn block" id="tmBtn" type="submit">Create login</button>
+      </form>`;
+    d.showModal(); $("#tmName").focus();
+    $("#addForm").onsubmit = async (e) => {
+      e.preventDefault(); const btn = $("#tmBtn"); btn.disabled = true; btn.textContent = "Creating…"; $("#tmErr").textContent = "";
+      try {
+        const r = await teamApi({ action: "create", email: $("#tmEmail").value, full_name: $("#tmName").value, is_admin: $("#tmAdmin").checked });
+        dropCache("profiles"); showLogin("Login created", r.email, r.password); onDone();
+      } catch (err) { $("#tmErr").textContent = err.message; btn.disabled = false; btn.textContent = "Create login"; }
+    };
+  }
   async function team() {
     const main = $("#main");
-    const { data, error } = await sb.from("profiles").select("*").order("created_at");
+    const [{ data, error }, emails] = await Promise.all([
+      sb.from("profiles").select("*").order("created_at"),
+      teamApi({ action: "list" }).then((r) => r.users).catch(() => null),
+    ]);
     if (error) throw error;
+    const em = Object.fromEntries((emails || []).map((u) => [u.id, u]));
     main.innerHTML = `
-      <header class="ph"><div><h1>Team & Access</h1><p class="muted">Only people marked as admin can sign in to this panel.</p></div></header>
-      <div class="tablewrap"><table class="tbl"><thead><tr><th>Name</th><th>Admin access</th><th>Added</th></tr></thead><tbody>
-      ${data.map((p) => `<tr><td><input class="inline" data-name="${p.id}" value="${esc(p.full_name || "")}" placeholder="Add a name" aria-label="Name">${p.id === S.me.id ? '<small>You</small>' : ""}</td>
-        <td><label class="switch"><input type="checkbox" data-admin="${p.id}" ${p.is_admin ? "checked" : ""} ${p.id === S.me.id ? "disabled title=\"You can't remove your own access\"" : ""}><span></span>${p.is_admin ? "Admin" : "No access"}</label></td><td class="muted">${fmtDate(p.created_at)}</td></tr>`).join("")}
+      <header class="ph"><div><h1>Team & Access</h1><p class="muted">Only people with admin access can sign in to this panel.</p></div>
+        <button class="btn" id="addMember" type="button">${icon("plus")} Add team member</button></header>
+      ${emails ? "" : `<p class="note">Couldn't load email addresses right now. You can still change names and access.</p>`}
+      <div class="tablewrap"><table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Admin access</th><th>Last sign-in</th><th></th></tr></thead><tbody>
+      ${data.map((p) => { const me = p.id === S.me.id, u = em[p.id] || {}; return `<tr>
+        <td><input class="inline" data-name="${p.id}" value="${esc(p.full_name || "")}" placeholder="Add a name" aria-label="Name">${me ? "<small>You</small>" : ""}</td>
+        <td class="muted">${esc(u.email || (me ? S.me.email : "—"))}</td>
+        <td><label class="switch"><input type="checkbox" data-admin="${p.id}" ${p.is_admin ? "checked" : ""} ${me ? 'disabled title="You can\'t remove your own access"' : ""}><span></span>${p.is_admin ? "Admin" : "No access"}</label></td>
+        <td class="muted">${u.last_sign_in_at ? ago(u.last_sign_in_at) : "Never"}</td>
+        <td>${me ? "" : `<div class="row-btns"><button type="button" data-reset="${p.id}" title="Give a new temporary password" aria-label="New password">${icon("shield")}</button><button type="button" data-del="${p.id}" title="Delete login" aria-label="Delete login">${icon("trash")}</button></div>`}</td></tr>`; }).join("")}
       </tbody></table></div>
-      <section class="panel"><div class="panel-h"><h2>Add a team member</h2></div><ol class="steps">
-        <li>Open <a href="https://supabase.com/dashboard/project/vyknmwrcvfnpbcrjugik/auth/users" target="_blank" rel="noopener">Supabase → Authentication → Users</a> and click <b>Add user → Send invitation</b> (or create user with a password).</li>
-        <li>Come back here and refresh. The new person appears in the list above with <b>No access</b>.</li>
-        <li>Turn on <b>Admin access</b> for them. They can now sign in.</li></ol></section>`;
-    $(".tablewrap", main).addEventListener("change", async (e) => {
+      <section class="panel"><div class="panel-h"><h2>Your password</h2></div>
+        <form id="myPw" class="frm"><div class="grid">
+          <div class="field"><label for="np1">New password</label><input id="np1" type="password" minlength="10" autocomplete="new-password" required></div>
+          <div class="field"><label for="np2">Type it again</label><input id="np2" type="password" minlength="10" autocomplete="new-password" required></div>
+        </div><div class="row end" style="padding:0 20px 20px"><button class="btn" type="submit">Change my password</button></div></form></section>`;
+    const reload = () => team();
+    $("#addMember").onclick = () => addMemberForm(reload);
+    const tw = $(".tablewrap", main);
+    tw.addEventListener("change", async (e) => {
       const a = e.target.closest("[data-admin]"), n = e.target.closest("[data-name]");
       if (a) { const { error } = await sb.from("profiles").update({ is_admin: a.checked }).eq("id", a.dataset.admin); if (error) { a.checked = !a.checked; return toast(friendly(error), "err"); } a.nextElementSibling.nextSibling.textContent = a.checked ? "Admin" : "No access"; toast(a.checked ? "Access given" : "Access removed"); }
       if (n) { const { error } = await sb.from("profiles").update({ full_name: n.value.trim() || null }).eq("id", n.dataset.name); if (error) return toast(friendly(error), "err"); dropCache("profiles"); toast("Name saved"); }
     });
+    tw.addEventListener("click", async (e) => {
+      const r = e.target.closest("[data-reset]"), x = e.target.closest("[data-del]");
+      const id = (r || x)?.dataset.reset || (r || x)?.dataset.del; if (!id) return;
+      const who = (data.find((p) => p.id === id)?.full_name) || em[id]?.email || "this person";
+      try {
+        if (r) {
+          if (!(await confirmBox("Give a new password?", `${who}'s old password will stop working. You'll get a new temporary one to share with them.`, "New password"))) return;
+          const res = await teamApi({ action: "reset_password", user_id: id }); showLogin("New password ready", em[id]?.email || who, res.password);
+        } else {
+          if (!(await confirmBox("Delete this login?", `${who} won't be able to sign in any more. Enquiries assigned to them stay, just unassigned.`))) return;
+          await teamApi({ action: "delete", user_id: id }); dropCache("profiles"); toast("Login deleted"); reload();
+        }
+      } catch (err) { toast(err.message, "err"); }
+    });
+    $("#myPw").onsubmit = async (e) => {
+      e.preventDefault(); const p1 = $("#np1").value, p2 = $("#np2").value;
+      if (p1 !== p2) return toast("The two passwords don't match", "err");
+      const { error } = await sb.auth.updateUser({ password: p1 });
+      if (error) return toast(friendly(error), "err");
+      e.target.reset(); toast("Password changed");
+    };
   }
 
   boot();

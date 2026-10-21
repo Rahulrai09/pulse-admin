@@ -19,5 +19,7 @@ Admin panel for **pulseio.in**: products, categories, website content (banners, 
 ## Adding a page for a new table
 Add an entry to `js/resources.js` (table, list columns, form fields) and a line in `NAV`. The list and form are built automatically.
 
-## Adding an admin
-Supabase → Authentication → Users → Add user. They appear in **Team & Access**; switch on **Admin access**.
+## Team & Access
+In the panel, **Team & Access → Add team member** creates a login with a temporary password (no email sent) and shows it once to copy or send on WhatsApp. The shield button gives someone a new temporary password; the bin deletes their login. Everyone can change their own password at the bottom of the page.
+
+These actions run in the Supabase Edge Function `team-admin` (source in `supabase/functions/team-admin/`). It checks the caller is an admin and uses the service-role key inside Supabase only; the key is never in this repo or the browser.
