@@ -65,6 +65,7 @@
     if (/violates foreign key/i.test(m)) return "This is still used somewhere else (for example by a product). Remove those links first.";
     if (/row-level security/i.test(m)) return "You don't have permission to do that. Ask an admin to check your access.";
     if (/JWT|session/i.test(m)) return "Your login has expired. Please sign in again.";
+    if (/rate limit/i.test(m)) return "Too many emails sent in the last hour. Please wait about an hour, then try once more (check your inbox and spam first).";
     if (/Failed to fetch|NetworkError/i.test(m)) return "No internet connection. Check your network and try again.";
     return m;
   };
