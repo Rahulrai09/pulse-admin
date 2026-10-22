@@ -193,3 +193,9 @@ dialog { border: 0; padding: 0; color: inherit; } dialog::backdrop { background:
 .gallery input.need { background: #fffbeb; } .gallery { min-height: 90px; }
 .spec-head { grid-template-columns: 1fr auto; } .spec-head input { font-weight: 700; color: var(--navy); background: #eef2fb; border-color: #c9d5f1; }
 @media (hover: none) { .gallery .mk { opacity: 1; } }
+/* publish page */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+.ticks { margin: 6px 0 14px; padding-left: 18px; } .ticks li { margin: 4px 0; }
+.warnbox { border-color: #fed7aa; background: #fffaf2; } .warnbox h2 { margin-top: 0; font-size: 17px; }
+.tablewrap.flat { border: 0; border-radius: 0; box-shadow: none; }
+.badge .spin.sm { width: 10px; height: 10px; border-width: 2px; margin-right: 5px; vertical-align: -1px; }

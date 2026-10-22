@@ -51,7 +51,7 @@
   function confirmBox(title, text, okLabel = "Delete") {
     return new Promise((res) => {
       const d = $("#confirm");
-      $("#cTitle").textContent = title; $("#cText").textContent = text; $("#cOk").textContent = okLabel;
+      $("#cTitle").textContent = title; $("#cText").textContent = text; $("#cOk").textContent = okLabel; $("#cOk").className = /delete|remove/i.test(okLabel) ? "btn danger-solid" : "btn";
       d.showModal();
       const done = (v) => { d.close(); $("#cOk").onclick = $("#cCancel").onclick = null; res(v); };
       $("#cOk").onclick = () => done(true); $("#cCancel").onclick = () => done(false);
@@ -218,7 +218,7 @@
     const [k = "dashboard", id] = location.hash.replace(/^#\/?/, "").split("/");
     $$("#nav a").forEach((a) => a.classList.toggle("on", a.dataset.k === k));
     const main = $("#main"); main.innerHTML = `<div class="loading"><span class="spin"></span>Loading…</div>`; main.scrollTop = 0; window.scrollTo(0, 0);
-    const go = k === "dashboard" ? dashboard() : k === "enquiries" ? leads("enquiries") : k === "demo_requests" ? leads("demo_requests") : k === "team" ? team()
+    const go = k === "dashboard" ? dashboard() : k === "enquiries" ? leads("enquiries") : k === "demo_requests" ? leads("demo_requests") : k === "team" ? team() : k === "publish" ? publish()
       : R[k] ? (id ? form(k, id === "new" ? null : id) : list(k)) : Promise.resolve(main.innerHTML = `<div class="empty"><h2>Page not found</h2><a class="btn" href="#/dashboard">Go to dashboard</a></div>`);
     Promise.resolve(go).catch((e) => { main.innerHTML = `<div class="empty"><h2>Couldn't load this page</h2><p>${esc(friendly(e))}</p><button class="btn" onclick="location.reload()">Try again</button></div>`; });
     document.title = (($(`#nav a[data-k="${k}"] span`) || {}).textContent || "Pulse") + " · Pulse Admin";
@@ -706,6 +706,83 @@
   }
   $("#dClose").addEventListener("click", () => $("#drawer").close());
   $("#drawer").addEventListener("click", (e) => { if (e.target.id === "drawer") $("#drawer").close(); });
+
+  /* ---------- publish to website ---------- */
+  const pubApi = async (body) => {
+    const { data, error } = await sb.functions.invoke("publish-site", { body });
+    if (error) { let j = null; try { j = await error.context.json(); } catch (_) {} const e = new Error(j?.error || error.message); e.setup = !!j?.setup; throw e; }
+    return data;
+  };
+  async function publish() {
+    const main = $("#main");
+    main.innerHTML = `
+      <header class="ph"><div><h1>Publish to website</h1><p class="muted">Copies your admin changes onto pulseio.in. The site updates about 1–2 minutes after you click.</p></div>
+        <div class="row"><button class="btn ghost" id="pubPreview" type="button">Check only</button><button class="btn" id="pubNow" type="button">${icon("up")} Publish now</button></div></header>
+      <div id="pubSetup"></div>
+      <div class="grid2">
+        <section class="panel"><div class="panel-h"><h2>Edited since the last publish</h2></div><div id="pending" class="pad"><span class="spin sm"></span> Checking…</div></section>
+        <section class="panel"><div class="panel-h"><h2>What publishing updates</h2></div><div class="pad">
+          <p><b>Live now</b></p><ul class="ticks">
+            <li>Page titles, descriptions and share images (<a href="#/website_pages">Page SEO</a>)</li>
+            <li>Product SEO title and description (<a href="#/products">Products</a>)</li>
+            <li>FAQ answers used by site search and the chatbot (<a href="#/faqs">FAQs</a>, only ones with a page link)</li></ul>
+          <p class="muted"><b>Coming next</b>: product specs, features, photos and brochures; new product pages, category cards and menus; home-page banners, stats, gallery, certificates and investors. Until then, changes to those are saved here but not yet shown on the website.</p>
+        </div></section>
+      </div>
+      <section class="panel"><div class="panel-h"><h2>Recent publishes</h2><button class="btn ghost sm" id="pubRefresh" type="button">${icon("refresh")} Refresh</button></div>
+        <div class="tablewrap flat"><table class="tbl"><thead><tr><th>Started</th><th>By</th><th>Result</th><th></th></tr></thead><tbody id="runs"><tr><td colspan="4" class="loading"><span class="spin"></span>Loading…</td></tr></tbody></table></div></section>`;
+    const setupBox = () => { $("#pubSetup").innerHTML = `<section class="panel warnbox"><div class="pad"><h2>One-time setup: connect publishing to GitHub</h2><ol class="steps">
+      <li>On GitHub, open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Settings → Developer settings → Fine-grained tokens → Generate new token</a>.</li>
+      <li>Name it <b>pulse-admin-publish</b>, set an expiry (e.g. 1 year), and under <b>Repository access</b> choose <b>Only select repositories → pulse-website</b>.</li>
+      <li>Under <b>Permissions → Repository permissions</b>, set <b>Actions</b> to <b>Read and write</b>. Leave everything else as is. Generate and copy the token.</li>
+      <li>In Supabase, open <a href="https://supabase.com/dashboard/project/vyknmwrcvfnpbcrjugik/functions/secrets" target="_blank" rel="noopener">Edge Functions → Secrets</a>, add a secret named <b>GITHUB_PUBLISH_TOKEN</b> and paste the token. Save.</li>
+      <li>Come back here and click <b>Check only</b> to test.</li></ol></div></section>`; };
+    let lastDone = null, timer = null;
+    const label = (r) => r.status !== "completed" ? `<span class="badge s-pending"><span class="spin sm"></span>${r.status === "queued" ? "Starting" : "Publishing"}</span>`
+      : r.conclusion === "success" ? `<span class="badge s-active">${/preview/i.test(r.title || "") ? "Checked" : "Done"}</span>` : `<span class="badge s-lost">${esc(human(r.conclusion || "failed"))}</span>`;
+    async function loadRuns() {
+      try {
+        const { runs } = await pubApi({ action: "status" });
+        $("#pubSetup").innerHTML = "";
+        $("#runs").innerHTML = runs.length ? runs.map((r) => `<tr><td>${ago(r.created_at)}<small class="muted"> · ${new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</small></td><td>${esc((r.title || "").replace(/^Publish by /, "").replace(/ \(preview only\)$/, "") || "—")}${/preview/i.test(r.title || "") ? ' <small class="muted">(check only)</small>' : ""}</td><td>${label(r)}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">Details</a></td></tr>`).join("")
+          : `<tr><td colspan="4" class="muted pad">Nothing published from here yet.</td></tr>`;
+        const real = runs.find((r) => r.status === "completed" && r.conclusion === "success" && !/preview/i.test(r.title || ""));
+        lastDone = real ? real.created_at : null;
+        clearTimeout(timer);
+        if (runs.some((r) => r.status !== "completed") && location.hash === "#/publish") timer = setTimeout(() => { loadRuns(); }, 5000);
+        return runs;
+      } catch (e) {
+        $("#runs").innerHTML = `<tr><td colspan="4" class="err">${esc(e.message)}</td></tr>`;
+        if (e.setup) setupBox();
+        return [];
+      }
+    }
+    async function loadPending() {
+      const since = lastDone || "1970-01-01";
+      const [p, w, f] = await Promise.all([
+        sb.from("products").select("id,name,updated_at").gt("updated_at", since).order("updated_at", { ascending: false }).limit(50),
+        sb.from("website_pages").select("id,page_name,updated_at").gt("updated_at", since).order("updated_at", { ascending: false }).limit(50),
+        sb.from("faqs").select("id,question,created_at").gt("created_at", since).order("created_at", { ascending: false }).limit(50),
+      ]);
+      const items = [...(p.data || []).map((r) => ["products", r.id, r.name, r.updated_at, "Product"]), ...(w.data || []).map((r) => ["website_pages", r.id, r.page_name, r.updated_at, "Page SEO"]), ...(f.data || []).map((r) => ["faqs", r.id, r.question, r.created_at, "New FAQ"])]
+        .sort((a, b) => b[3].localeCompare(a[3]));
+      $("#pending").innerHTML = !lastDone ? `<p class="muted">Not published from here yet. Your first publish will check every page and product.</p>`
+        : items.length ? `<ul class="feed">${items.slice(0, 12).map(([t, id, n, d, k]) => `<li><a href="#/${t}/${id}"><div><b>${esc(n)}</b><small>${k}</small></div><div class="r"><small>${ago(d)}</small></div></a></li>`).join("")}</ul>${items.length > 12 ? `<p class="muted">…and ${items.length - 12} more</p>` : ""}`
+        : `<p class="muted">Nothing edited since the last publish. The website is up to date.</p>`;
+    }
+    const start = async (dry) => {
+      const b = dry ? $("#pubPreview") : $("#pubNow");
+      if (!dry && !(await confirmBox("Publish to the website?", "Your saved admin changes will go live on pulseio.in in about 1–2 minutes.", "Publish"))) return;
+      b.disabled = true;
+      try { await pubApi({ action: "publish", dry_run: dry }); toast(dry ? "Checking… this takes about 30 seconds" : "Publishing started"); setTimeout(loadRuns, 3000); }
+      catch (e) { toast(e.message, "err"); if (e.setup) setupBox(); }
+      finally { b.disabled = false; }
+    };
+    $("#pubNow").onclick = () => start(false);
+    $("#pubPreview").onclick = () => start(true);
+    $("#pubRefresh").onclick = () => loadRuns().then(loadPending);
+    await loadRuns(); await loadPending();
+  }
 
   /* ---------- team ---------- */
   const teamApi = async (body) => {

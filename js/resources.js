@@ -126,7 +126,7 @@
         { name: "question", label: "Question", type: "text", required: true },
         { name: "answer", label: "Answer", type: "textarea", rows: 5, required: true },
         { name: "category", label: "Category", type: "text", suggest: true, help: "e.g. Critical Care, Blog, Company" },
-        { name: "page_url", label: "Page it belongs to", type: "url", help: "The page this question is shown on, e.g. https://www.pulseio.in/critical-care/icu-ventilator/" },
+        { name: "page_url", label: "Page it belongs to", type: "url", help: "The page this question belongs to, e.g. https://www.pulseio.in/critical-care/icu-ventilator/. Needed for it to appear in site search and the chatbot after you publish." },
         ORDER,
         { name: "is_active", label: "Show on website", type: "bool", default: true },
       ],
@@ -187,7 +187,7 @@
     { group: "Overview", items: [["dashboard", "Dashboard", "home"]] },
     { group: "Leads", items: [["enquiries", "Enquiries", "inbox"], ["demo_requests", "Demo Requests", "calendar"]] },
     { group: "Catalogue", items: [["products", "Products", "box"], ["categories", "Categories", "grid"], ["product_types", "Product Types", "tag"], ["applications", "Applications", "layers"], ["certifications", "Product Certifications", "award"]] },
-    { group: "Website", items: [["banners", "Banners", "image"], ["faqs", "FAQs", "help"], ["site_stats", "Site Stats", "bar"], ["facility_gallery", "Facility Gallery", "camera"], ["company_certifications", "Company Certificates", "award"], ["company_partners", "Partners & Investors", "users"], ["website_pages", "Page SEO", "file"]] },
+    { group: "Website", items: [["publish", "Publish to website", "up"], ["banners", "Banners", "image"], ["faqs", "FAQs", "help"], ["site_stats", "Site Stats", "bar"], ["facility_gallery", "Facility Gallery", "camera"], ["company_certifications", "Company Certificates", "award"], ["company_partners", "Partners & Investors", "users"], ["website_pages", "Page SEO", "file"]] },
     { group: "Network", items: [["distributors", "Distributors", "truck"], ["countries", "Countries", "globe"]] },
     { group: "Settings", items: [["team", "Team & Access", "shield"]] },
   ];
