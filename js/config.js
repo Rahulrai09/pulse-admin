@@ -3,6 +3,6 @@
 window.PULSE_ADMIN = {
   supabaseUrl: "https://vyknmwrcvfnpbcrjugik.supabase.co",
   supabaseKey: "sb_publishable_An5cioRIYrYkii-Z7QFVgg_FPFpJZ_6",
-  imageBucket: "product-images",
+  imageBucket: "product-images", docBucket: "documents",
   websiteUrl: "https://www.pulseio.in",
 };

@@ -98,15 +98,43 @@
     const blob = await new Promise((r) => c.toBlob(r, "image/webp", 0.85));
     return blob && blob.size < file.size ? new File([blob], file.name.replace(/\.\w+$/, "") + ".webp", { type: "image/webp" }) : file;
   }
+  const IMG_TYPES = /^image\/(jpeg|png|webp|gif|avif)$/;
+  const mb = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+  const cleanName = (n) => n.replace(/\.[^.]+$/, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "file";
+  // Uploads an image (compressed to WebP, max 1600px) or a PDF. Returns { url, note }.
   async function upload(file, folder) {
-    if (file.size > 15 * 1024 * 1024) throw new Error("That file is too big. Use an image under 15 MB.");
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    if (isPdf) {
+      if (file.size > 25 * 1024 * 1024) throw new Error(`That PDF is ${mb(file.size)}. The limit is 25 MB. Compress it (e.g. ilovepdf.com) and try again.`);
+      const path = `${folder}/${cleanName(file.name)}-${Date.now().toString(36)}.pdf`;
+      const { error } = await sb.storage.from(CFG.docBucket).upload(path, file, { cacheControl: "31536000", contentType: "application/pdf", upsert: false });
+      if (error) throw error;
+      return { url: sb.storage.from(CFG.docBucket).getPublicUrl(path).data.publicUrl, note: `PDF uploaded (${mb(file.size)})` };
+    }
+    if (!IMG_TYPES.test(file.type)) throw new Error("Use a JPG, PNG, WebP, GIF or AVIF image. For documents, upload a PDF.");
+    if (file.size > 25 * 1024 * 1024) throw new Error(`That image is ${mb(file.size)}. Use one under 25 MB.`);
     const f = await shrink(file);
     if (f.size > 5 * 1024 * 1024) throw new Error("Image is still over 5 MB after compressing. Use a smaller image.");
     const ext = (f.name.split(".").pop() || "jpg").toLowerCase();
-    const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const path = `${folder}/${cleanName(file.name)}-${Date.now().toString(36)}.${ext}`;
     const { error } = await sb.storage.from(CFG.imageBucket).upload(path, f, { cacheControl: "31536000", contentType: f.type, upsert: false });
     if (error) throw error;
-    return sb.storage.from(CFG.imageBucket).getPublicUrl(path).data.publicUrl;
+    return { url: sb.storage.from(CFG.imageBucket).getPublicUrl(path).data.publicUrl, note: f.size < file.size ? `Image uploaded (${mb(file.size)} → ${mb(f.size)})` : `Image uploaded (${mb(f.size)})` };
+  }
+  // Deletes files that live in our own storage (links to pulseio.in etc. are left alone).
+  async function removeStored(urls) {
+    const by = {};
+    for (const u of urls.filter(Boolean)) {
+      const m = String(u).match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
+      if (m && [CFG.imageBucket, CFG.docBucket].includes(m[1])) (by[m[1]] ||= []).push(decodeURIComponent(m[2]));
+    }
+    await Promise.all(Object.entries(by).map(([b, paths]) => sb.storage.from(b).remove(paths).catch(() => null)));
+  }
+  // Lets any element accept dropped files.
+  function dropZone(el, onFiles) {
+    ["dragenter", "dragover"].forEach((t) => el.addEventListener(t, (e) => { if (![...(e.dataTransfer?.types || [])].includes("Files")) return; e.preventDefault(); el.classList.add("drop"); }));
+    ["dragleave", "drop"].forEach((t) => el.addEventListener(t, () => el.classList.remove("drop")));
+    el.addEventListener("drop", (e) => { if (!e.dataTransfer?.files?.length) return; e.preventDefault(); onFiles([...e.dataTransfer.files]); });
   }
 
   /* ---------- screens ---------- */
@@ -239,6 +267,7 @@
   /* ---------- generic list ---------- */
   function cell(c, row, res) {
     const v = row[c.name];
+    if (c.type === "file") return `<td>${v ? `<a href="${esc(v)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${/\.pdf(\?|#|$)/i.test(v) ? "PDF" : "View"}</a>` : '<span class="muted">—</span>'}</td>`;
     if (c.type === "image") return `<td class="thumb${c.wide ? " wide" : ""}">${v ? `<img src="${esc(v)}" alt="" loading="lazy">` : `<span class="noimg">${icon("image")}</span>`}</td>`;
     if (c.fk) return `<td>${esc(fkLabel(c.fk, v))}</td>`;
     if (c.type === "badge") return `<td><span class="badge s-${esc(v)}">${esc(human(v))}</span></td>`;
@@ -265,7 +294,8 @@
       return `<select data-f="${f.name}" aria-label="Filter by ${esc(human(f.name))}"><option value="">All ${esc(human(f.fk ? f.fk : f.name)).toLowerCase()}</option>${opts.map(([v, l]) => `<option value="${esc(v)}" ${st.f[f.name] === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
     }));
     main.innerHTML = `
-      <header class="ph"><div><h1>${esc(res.title)}</h1><p class="muted" id="lcount"> </p></div><a class="btn" href="#/${key}/new">${icon("plus")} Add ${esc(res.one)}</a></header>
+      <header class="ph"><div><h1>${esc(res.title)}</h1><p class="muted" id="lcount"> </p></div><div class="row">${res.bulk ? `<label class="btn ghost">${icon("image")} ${esc(res.bulk.label)}<input type="file" id="bulkUp" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" multiple hidden></label>` : ""}<a class="btn" href="#/${key}/new">${icon("plus")} Add ${esc(res.one)}</a></div></header>
+      ${res.bulk ? `<p class="note info" id="bulkNote">Tip: drop several photos onto the list below (or use the upload button) to add them all at once. Captions come from the file names, and you can edit them afterwards.</p>` : ""}
       <div class="toolbar"><label class="search">${icon("search")}<input type="search" id="q" placeholder="Search ${esc(res.title.toLowerCase())}…" value="${esc(st.q)}"></label>${filters.join("")}</div>
       <div class="tablewrap"><table class="tbl"><thead><tr>${res.list.map((c) => `<th>${esc(head(c))}</th>`).join("")}</tr></thead><tbody id="rows"><tr><td colspan="${res.list.length}" class="loading"><span class="spin"></span>Loading…</td></tr></tbody></table></div>
       <div class="pager" id="pager"></div>`;
@@ -285,6 +315,23 @@
     }
     $("#q").addEventListener("input", debounce((e) => { st.q = e.target.value.trim(); st.page = 0; save(); load(); }));
     $$("[data-f]").forEach((s) => s.addEventListener("change", () => { st.f[s.dataset.f] = s.value; st.page = 0; save(); load(); }));
+    if (res.bulk) {
+      const b = res.bulk, note = $("#bulkNote"), tip = note.innerHTML;
+      const go = async (files) => {
+        files = files.filter((f) => IMG_TYPES.test(f.type)); if (!files.length) return toast("Use JPG, PNG, WebP, GIF or AVIF images.", "err");
+        let n = 0; note.innerHTML = `<span class="spin sm"></span> Uploading 0 of ${files.length}…`;
+        const { count: have } = await sb.from(res.table).select("id", { count: "exact", head: true });
+        const rows = (await Promise.all(files.map(async (f, k) => {
+          try { const r = await upload(f, res.table); n++; note.innerHTML = `<span class="spin sm"></span> Uploading ${n} of ${files.length}…`;
+            return { ...b.defaults, [b.field]: r.url, [b.caption]: f.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim(), display_order: (have || 0) + k + 1 }; }
+          catch (err) { toast(`${f.name}: ${friendly(err)}`, "err"); return null; }
+        }))).filter(Boolean);
+        if (rows.length) { const { error } = await sb.from(res.table).insert(rows); if (error) toast(friendly(error), "err"); else toast(`${rows.length} photo${rows.length > 1 ? "s" : ""} added`); }
+        note.innerHTML = tip; load();
+      };
+      $("#bulkUp").addEventListener("change", (e) => { const fs = [...e.target.files]; e.target.value = ""; go(fs); });
+      dropZone($(".tablewrap", main), go);
+    }
     await load();
   }
   function pager(count, st, load, save) {
@@ -307,9 +354,12 @@
       case "bool": return `<div class="field check"><label class="switch"><input type="checkbox" id="${id}" name="${f.name}" ${(v ?? f.default) ? "checked" : ""}><span></span>${esc(f.label)}</label>${help}</div>`;
       case "number": return `<div class="field">${lab}<input type="number" id="${id}" name="${f.name}" value="${esc(val)}" ${f.min != null ? `min="${f.min}"` : ""} ${f.max != null ? `max="${f.max}"` : ""}${req}>${help}</div>`;
       case "date": return `<div class="field">${lab}<input type="date" id="${id}" name="${f.name}" value="${esc(val)}"${req}>${help}</div>`;
-      case "image": return `<div class="field img-field" data-name="${f.name}">${lab}<div class="img-box">${val ? `<img src="${esc(val)}" alt="">` : `<span class="noimg big">${icon("image")}</span>`}</div>
-          <div class="img-actions"><label class="btn ghost sm">${icon("plus")} ${val ? "Replace" : "Upload"}<input type="file" accept="image/*" hidden></label>${val ? `<button type="button" class="btn ghost sm danger" data-clear>Remove</button>` : ""}</div>
+      case "image": return `<div class="field img-field" data-name="${f.name}" data-kind="image"${f.minWidth ? ` data-minw="${f.minWidth}"` : ""}>${lab}<div class="img-box" title="Drop an image here"></div><small class="img-info"></small>
+          <div class="img-actions"><label class="btn ghost sm">${icon("plus")} <span class="up-l">Upload</span><input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" hidden></label><button type="button" class="btn ghost sm danger" data-clear hidden>Remove</button></div>
           <input type="url" id="${id}" name="${f.name}" value="${esc(val)}" placeholder="…or paste an image link"${req}>${help}</div>`;
+      case "file": return `<div class="field img-field wide" data-name="${f.name}" data-kind="${f.accept === "any" ? "any" : "pdf"}">${lab}<div class="file-box" title="Drop a file here"></div>
+          <div class="img-actions"><label class="btn ghost sm">${icon("plus")} <span class="up-l">Upload</span><input type="file" accept="${f.accept === "any" ? "application/pdf,image/jpeg,image/png,image/webp" : "application/pdf"}" hidden></label><button type="button" class="btn ghost sm danger" data-clear hidden>Remove</button></div>
+          <input type="url" id="${id}" name="${f.name}" value="${esc(val)}" placeholder="…or paste a link"${req}>${help}</div>`;
       case "specs": return `<div class="field wide" id="specs"></div>`;
       case "slug": return `<div class="field">${lab}<div class="slug"><span>/</span><input type="text" id="${id}" name="${f.name}" value="${esc(val)}" data-from="${f.from}" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" title="Lowercase letters, numbers and dashes only"${req}></div>${help}</div>`;
       default: return `<div class="field">${lab}<input type="${f.type === "email" ? "email" : f.type === "tel" ? "tel" : f.type === "url" ? "url" : "text"}" id="${id}" name="${f.name}" value="${esc(val)}" ${f.suggest ? `list="dl_${f.name}"` : ""}${req}>${f.suggest ? `<datalist id="dl_${f.name}"></datalist>` : ""}${counter}${help}</div>`;
@@ -330,7 +380,9 @@
     main.innerHTML = `
       <header class="ph"><div><a class="back" href="#/${key}">← ${esc(res.title)}</a><h1>${id ? esc(row.name || row.title || row.question || row.company_name || row.page_name || row.label || row.caption || "Edit " + res.one) : "New " + esc(res.one)}</h1>
         ${id && row.updated_at ? `<p class="muted">Last updated ${ago(row.updated_at)}</p>` : ""}</div>
-        ${key === "products" && id && row.status === "active" ? `<a class="btn ghost" target="_blank" rel="noopener" href="${esc(CFG.websiteUrl)}/${esc(fkSlug(row.category_id))}/${esc(row.slug)}/">${icon("ext")} View on website</a>` : ""}</header>
+        ${key === "products" && id && row.specifications?.page_url ? `<a class="btn ghost" target="_blank" rel="noopener" href="${esc(row.specifications.page_url)}">${icon("ext")} View on website</a>` : ""}
+        ${key === "faqs" && id && row.page_url ? `<a class="btn ghost" target="_blank" rel="noopener" href="${esc(row.page_url)}">${icon("ext")} View page</a>` : ""}
+        ${key === "website_pages" && id && row.file_path ? `<a class="btn ghost" target="_blank" rel="noopener" href="${esc(CFG.websiteUrl)}/${esc(row.file_path === "index.html" ? "" : row.file_path.replace(/^\//, ""))}">${icon("ext")} View page</a>` : ""}</header>
       <form id="frm" class="frm" novalidate>
         ${Object.entries(groups).map(([g, fs]) => `<section class="panel"><div class="panel-h"><h2>${esc(g)}</h2></div><div class="grid">${fs.map((f) => fieldHTML(f, row[f.name])).join("")}</div></section>`).join("")}
         <div id="extras"></div>
@@ -365,9 +417,12 @@
     });
     if (id) $("#del").addEventListener("click", async () => {
       if (!(await confirmBox(`Delete this ${res.one}?`, "This can't be undone."))) return;
+      const files = res.fields.filter((f) => f.type === "image" || f.type === "file").map((f) => row[f.name]);
+      if (res.extras) { const { data: gi } = await sb.from("product_images").select("image_url").eq("product_id", id); files.push(...(gi || []).map((g) => g.image_url)); }
       if (res.extras) await Promise.all(["product_images", "product_applications", "product_certifications"].map((t) => sb.from(t).delete().eq("product_id", id)));
       const { error } = await sb.from(res.table).delete().eq("id", id);
       if (error) { toast(friendly(error), "err"); return; }
+      await removeStored(files);
       S.dirty = false; dropCache(res.table); toast("Deleted"); location.hash = `#/${key}`;
     });
   }
@@ -388,17 +443,41 @@
     $$("datalist", frm).forEach(async (dl) => { const col = dl.id.slice(3); const { data } = await sb.from(res.table).select(col).not(col, "is", null).limit(500); dl.innerHTML = [...new Set((data || []).map((r) => r[col]))].map((v) => `<option value="${esc(v)}">`).join(""); });
     // image uploads
     $$(".img-field", frm).forEach((box) => {
-      const input = $("input[type=url]", box), file = $("input[type=file]", box), preview = $(".img-box", box);
-      const paint = () => { preview.innerHTML = input.value ? `<img src="${esc(input.value)}" alt="">` : `<span class="noimg big">${icon("image")}</span>`; };
-      input.addEventListener("change", paint);
-      box.addEventListener("click", (e) => { if (e.target.closest("[data-clear]")) { input.value = ""; paint(); S.dirty = true; } });
-      file.addEventListener("change", async () => {
-        const f = file.files[0]; if (!f) return;
-        preview.innerHTML = `<span class="spin"></span>`;
-        try { input.value = await upload(f, res.table); paint(); S.dirty = true; $("#dirtyNote").textContent = "Unsaved changes"; toast("Image uploaded. Click Save to keep it."); }
+      const input = $("input[type=url]", box), file = $("input[type=file]", box), kind = box.dataset.kind;
+      const preview = $(".img-box, .file-box", box), info = $(".img-info", box), minW = +box.dataset.minw || 0;
+      const isPdfUrl = (u) => /\.pdf(\?|#|$)/i.test(u);
+      const paint = () => {
+        const u = input.value.trim();
+        $(".up-l", box).textContent = u ? "Replace" : "Upload";
+        $("[data-clear]", box).hidden = !u;
+        if (kind === "image" || (kind === "any" && u && !isPdfUrl(u))) {
+          preview.className = "img-box";
+          preview.innerHTML = u ? `<img src="${esc(u)}" alt="">` : `<span class="noimg big">${icon("image")}</span><small>Drop an image here</small>`;
+          if (info) info.textContent = "";
+          const im = $("img", preview);
+          if (im) {
+            im.onload = () => { if (!info) return; const w = im.naturalWidth, h = im.naturalHeight; info.textContent = `${w} × ${h} px` + (minW && w < minW ? ` · smaller than the ${minW}px we recommend, may look blurry` : ""); info.classList.toggle("warn", !!(minW && w < minW)); };
+            im.onerror = () => { preview.innerHTML = `<span class="noimg big">${icon("image")}</span><small class="warn">This image link doesn't load. Check it or upload the file.</small>`; };
+          }
+        } else {
+          preview.className = "file-box";
+          const name = u ? decodeURIComponent(u.split("/").pop().split("?")[0]) : "";
+          preview.innerHTML = u ? `${icon("file")}<a href="${esc(u)}" target="_blank" rel="noopener">${esc(name)}</a>` : `${icon("file")}<span class="muted">No file yet. Drop a PDF here or click Upload.</span>`;
+        }
+      };
+      const send = async (f) => {
+        if (!f) return;
+        if (kind === "image" && !IMG_TYPES.test(f.type)) return toast("Use a JPG, PNG, WebP, GIF or AVIF image.", "err");
+        if (kind === "pdf" && !(f.type === "application/pdf" || /\.pdf$/i.test(f.name))) return toast("Please upload a PDF file.", "err");
+        preview.innerHTML = `<span class="spin"></span><small>Uploading ${esc(f.name)}…</small>`;
+        try { const r = await upload(f, res.table); input.value = r.url; paint(); S.dirty = true; $("#dirtyNote").textContent = "Unsaved changes"; toast(`${r.note}. Click Save to keep it.`); }
         catch (e) { toast(friendly(e), "err"); paint(); }
-        file.value = "";
-      });
+      };
+      paint();
+      input.addEventListener("change", paint);
+      box.addEventListener("click", (e) => { if (e.target.closest("[data-clear]")) { input.value = ""; paint(); S.dirty = true; $("#dirtyNote").textContent = "Unsaved changes"; } });
+      file.addEventListener("change", async () => { await send(file.files[0]); file.value = ""; });
+      dropZone(preview, (fs) => send(fs[0]));
     });
   }
 
@@ -410,9 +489,9 @@
     const tags = Array.isArray(spec.tags) ? spec.tags : [];
     const other = Object.keys(spec).filter((k) => !["specs", "features", "tags"].includes(k));
     $("#specs").innerHTML = `
-      <div class="sub-h"><b>Technical specifications</b><small class="help">Shown as a table on the product page.</small></div>
-      <div id="specRows">${rows.map((r) => specRow(r.label ?? r.name ?? "", r.value ?? "")).join("")}</div>
-      <button type="button" class="btn ghost sm" id="addSpec">${icon("plus")} Add row</button>
+      <div class="sub-h"><b>Technical specifications</b><small class="help">Shown as a table on the product page. Use a section heading to split it into parts, e.g. "Controlled Parameters".</small></div>
+      <div id="specRows">${(() => { let g = null; return rows.map((r) => { const h = (r.group || "") !== (g || "") && r.group ? specHead(r.group) : ""; g = r.group || g; return h + specRow(r.label ?? r.name ?? "", r.value ?? ""); }).join(""); })()}</div>
+      <div class="row"><button type="button" class="btn ghost sm" id="addSpec">${icon("plus")} Add row</button><button type="button" class="btn ghost sm" id="addHead">${icon("plus")} Add section heading</button></div>
       <div class="sub-h"><b>Key features</b><small class="help">One per line.</small></div>
       <textarea id="featList" rows="5">${esc(feats.join("\n"))}</textarea>
       <div class="sub-h"><b>Tags</b><small class="help">Short labels, separated by commas, e.g. Portable, ICU, 24V battery.</small></div>
@@ -420,15 +499,25 @@
       ${other.length ? `<div class="sub-h"><b>Other details</b><small class="help">Kept as they are.</small></div><pre class="raw">${esc(JSON.stringify(Object.fromEntries(other.map((k) => [k, spec[k]])), null, 2))}</pre>` : ""}`;
     const add = (l = "", v = "") => { $("#specRows").insertAdjacentHTML("beforeend", specRow(l, v)); };
     $("#addSpec").addEventListener("click", () => { add(); $("#specRows").lastElementChild.querySelector("input").focus(); });
+    $("#addHead").addEventListener("click", () => { $("#specRows").insertAdjacentHTML("beforeend", specHead("")); $("#specRows").lastElementChild.querySelector("input").focus(); S.dirty = true; });
     $("#specRows").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; const r = b.closest(".spec-row"); if (b.dataset.a === "del") r.remove(); if (b.dataset.a === "up" && r.previousElementSibling) r.parentNode.insertBefore(r, r.previousElementSibling); if (b.dataset.a === "down" && r.nextElementSibling) r.parentNode.insertBefore(r.nextElementSibling, r); S.dirty = true; });
     if (!rows.length) add();
   }
   const specRow = (l, v) => `<div class="spec-row"><input type="text" placeholder="e.g. Battery" value="${esc(l)}" aria-label="Specification name"><input type="text" placeholder="e.g. 24V 20Ah lithium-ion" value="${esc(v)}" aria-label="Specification value"><span class="row-btns"><button type="button" data-a="up" title="Move up">${icon("up")}</button><button type="button" data-a="down" title="Move down">${icon("down")}</button><button type="button" data-a="del" title="Remove">${icon("x")}</button></span></div>`;
+  const specHead = (t) => `<div class="spec-row spec-head"><input type="text" placeholder="Section heading, e.g. Monitored Parameters" value="${esc(t)}" aria-label="Section heading"><span class="row-btns"><button type="button" data-a="up" title="Move up">${icon("up")}</button><button type="button" data-a="down" title="Move down">${icon("down")}</button><button type="button" data-a="del" title="Remove">${icon("x")}</button></span></div>`;
   function readSpecs(orig) {
     const keep = orig && typeof orig === "object" ? Object.fromEntries(Object.entries(orig).filter(([k]) => !["specs", "features", "tags"].includes(k))) : {};
+    let group = null;
+    const specs = [];
+    $$("#specRows .spec-row").forEach((r) => {
+      if (r.classList.contains("spec-head")) { group = $("input", r).value.trim() || null; return; }
+      const [a, b] = $$("input", r); const row = { label: a.value.trim(), value: b.value.trim() };
+      if (!row.label && !row.value) return;
+      specs.push(group ? { group, ...row } : row);
+    });
     return {
       ...keep,
-      specs: $$("#specRows .spec-row").map((r) => { const [a, b] = $$("input", r); return { label: a.value.trim(), value: b.value.trim() }; }).filter((r) => r.label || r.value),
+      specs,
       features: $("#featList").value.split("\n").map((s) => s.trim()).filter(Boolean),
       tags: $("#tagList").value.split(",").map((s) => s.trim()).filter(Boolean),
     };
@@ -445,39 +534,61 @@
     const hasA = new Set((pa.data || []).map((r) => r.application_id)), hasC = new Set((pc.data || []).map((r) => r.certification_id));
     const chips = (list, has, name, empty, link) => list.length ? `<div class="chips">${list.map((o) => `<label class="chip"><input type="checkbox" name="${name}" value="${o.id}" ${has.has(o.id) ? "checked" : ""}><span>${esc(o.label)}</span></label>`).join("")}</div>` : `<p class="muted">${empty} <a href="#/${link}/new">Add one →</a></p>`;
     $("#extras").innerHTML = `
-      <section class="panel"><div class="panel-h"><h2>More photos</h2><label class="btn ghost sm">${icon("plus")} Add photos<input type="file" id="galUp" accept="image/*" multiple hidden></label></div>
-        <div class="gallery" id="gallery"></div><small class="help pad">Drag photos to reorder. The first photo shows first on the website.</small></section>
+      <section class="panel"><div class="panel-h"><h2>Photo gallery <small class="muted" id="galCount"></small></h2><label class="btn ghost sm">${icon("plus")} Add photos<input type="file" id="galUp" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" multiple hidden></label></div>
+        <div class="gallery" id="gallery" title="Drop photos here"></div><p class="help pad" id="galHelp">Drop photos here or click <b>Add photos</b> (you can pick several). Drag to reorder. The first photo is the main one on the website. Add alt text so Google and screen readers know what each photo shows.</p></section>
       <section class="panel"><div class="panel-h"><h2>Used in (applications)</h2></div><div class="pad">${chips(apps, hasA, "app", "No applications yet.", "applications")}</div></section>
       <section class="panel"><div class="panel-h"><h2>Certifications</h2></div><div class="pad">${chips(certs, hasC, "cert", "No certifications yet.", "certifications")}</div></section>`;
     let gal = imgs.data || [];
     const paint = () => {
-      $("#gallery").innerHTML = gal.length ? gal.map((g, i) => `<figure draggable="true" data-i="${i}"><img src="${esc(g.image_url)}" alt="${esc(g.alt_text || "")}" loading="lazy"><input type="text" placeholder="Alt text (describe the photo)" value="${esc(g.alt_text || "")}" data-alt="${g.id}"><button type="button" class="x" data-rm="${g.id}" title="Remove photo">${icon("x")}</button>${g.is_primary ? '<span class="prim">Main</span>' : ""}</figure>`).join("") : `<p class="muted pad">No extra photos yet.</p>`;
+      $("#gallery").innerHTML = gal.length ? gal.map((g, i) => `<figure draggable="true" data-i="${i}"><img src="${esc(g.image_url)}" alt="${esc(g.alt_text || "")}" loading="lazy"><input type="text" placeholder="Alt text (describe the photo)" value="${esc(g.alt_text || "")}" data-alt="${g.id}"${g.alt_text ? "" : ' class="need"'}><button type="button" class="x" data-rm="${g.id}" title="Remove photo">${icon("x")}</button>${i === 0 ? '<span class="prim">Main</span>' : `<button type="button" class="mk" data-main="${g.id}" title="Make this the main photo">Make main</button>`}</figure>`).join("") : `<p class="muted pad">No photos yet.</p>`;
+      $("#galCount").textContent = gal.length ? `(${gal.length})` : "";
     };
     paint();
-    $("#galUp").addEventListener("change", async (e) => {
-      const files = [...e.target.files]; e.target.value = "";
-      for (const f of files) {
-        try { const url = await upload(f, "products"); const { data, error } = await sb.from("product_images").insert({ product_id: pid, image_url: url, display_order: gal.length, is_primary: !gal.length }).select("*").single(); if (error) throw error; gal.push(data); paint(); }
-        catch (err) { toast(friendly(err), "err"); }
-      }
-      if (files.length) toast(`${files.length} photo${files.length > 1 ? "s" : ""} added`);
-    });
+    const pname = () => ($("#f_name")?.value || "").trim();
+    const saveOrder = async () => {
+      await Promise.all(gal.map((g, i) => sb.from("product_images").update({ display_order: i, is_primary: i === 0 }).eq("id", g.id)));
+      gal.forEach((g, i) => { g.display_order = i; g.is_primary = i === 0; });
+      // keep the product's main image in step with the first gallery photo
+      const first = gal[0]?.image_url || null, main = $("#f_featured_image");
+      if (first && main && main.value !== first) { main.value = first || ""; main.dispatchEvent(new Event("change")); await sb.from("products").update({ featured_image: first }).eq("id", pid); }
+    };
+    const addFiles = async (files) => {
+      files = files.filter((f) => IMG_TYPES.test(f.type));
+      if (!files.length) return toast("Use JPG, PNG, WebP, GIF or AVIF images.", "err");
+      let done = 0, failed = 0; const help = $("#galHelp"), was = help.innerHTML;
+      const tick = () => { help.innerHTML = `<span class="spin sm"></span> Uploading ${done + failed} of ${files.length}…`; };
+      tick();
+      const results = await Promise.all(files.map(async (f, k) => {
+        try { const r = await upload(f, "products"); done++; tick(); return { url: r.url, k }; }
+        catch (err) { failed++; tick(); toast(`${f.name}: ${friendly(err)}`, "err"); return null; }
+      }));
+      const rows = results.filter(Boolean).sort((a, b) => a.k - b.k).map((r, j) => ({ product_id: pid, image_url: r.url, alt_text: pname() ? `${pname()} photo ${gal.length + j + 1}` : null, display_order: gal.length + j, is_primary: gal.length + j === 0 }));
+      if (rows.length) { const { data, error } = await sb.from("product_images").insert(rows).select("*"); if (error) toast(friendly(error), "err"); else { gal.push(...data); paint(); await saveOrder(); } }
+      help.innerHTML = was;
+      if (done) toast(`${done} photo${done > 1 ? "s" : ""} added${failed ? `, ${failed} failed` : ""}`);
+    };
+    $("#galUp").addEventListener("change", async (e) => { const files = [...e.target.files]; e.target.value = ""; await addFiles(files); });
+    dropZone($("#gallery"), addFiles);
     $("#gallery").addEventListener("click", async (e) => {
+      const mk = e.target.closest("[data-main]");
+      if (mk) { const i = gal.findIndex((g) => g.id === mk.dataset.main); const [m] = gal.splice(i, 1); gal.unshift(m); paint(); await saveOrder(); return toast("Main photo changed"); }
       const b = e.target.closest("[data-rm]"); if (!b) return;
-      if (!(await confirmBox("Remove this photo?", "It will be removed from the product."))) return;
+      if (!(await confirmBox("Remove this photo?", "It will be removed from the product and the website."))) return;
+      const gone = gal.find((g) => g.id === b.dataset.rm);
       const { error } = await sb.from("product_images").delete().eq("id", b.dataset.rm);
       if (error) return toast(friendly(error), "err");
-      gal = gal.filter((g) => g.id !== b.dataset.rm); paint(); toast("Photo removed");
+      gal = gal.filter((g) => g.id !== b.dataset.rm); paint(); await saveOrder();
+      if (gone && !gal.some((g) => g.image_url === gone.image_url)) await removeStored([gone.image_url]);
+      toast("Photo removed");
     });
     $("#gallery").addEventListener("change", async (e) => { const a = e.target.closest("[data-alt]"); if (!a) return; await sb.from("product_images").update({ alt_text: a.value.trim() || null }).eq("id", a.dataset.alt); toast("Alt text saved"); });
     let from = null;
     $("#gallery").addEventListener("dragstart", (e) => { from = +e.target.closest("figure")?.dataset.i; });
     $("#gallery").addEventListener("dragover", (e) => e.preventDefault());
     $("#gallery").addEventListener("drop", async (e) => {
-      e.preventDefault(); const to = +e.target.closest("figure")?.dataset.i; if (from == null || isNaN(to) || from === to) return;
-      const [m] = gal.splice(from, 1); gal.splice(to, 0, m); paint();
-      await Promise.all(gal.map((g, i) => sb.from("product_images").update({ display_order: i, is_primary: i === 0 }).eq("id", g.id)));
-      gal.forEach((g, i) => { g.display_order = i; g.is_primary = i === 0; }); paint(); toast("Order saved");
+      if (e.dataTransfer?.files?.length) return; // dropped files are handled by the drop zone
+      e.preventDefault(); const to = +e.target.closest("figure")?.dataset.i; const f0 = from; from = null; if (f0 == null || isNaN(to) || f0 === to) return;
+      const [m] = gal.splice(f0, 1); gal.splice(to, 0, m); paint(); await saveOrder(); paint(); toast("Order saved");
     });
   }
   async function saveProductLinks(pid) {
