@@ -724,9 +724,10 @@
         <section class="panel"><div class="panel-h"><h2>What publishing updates</h2></div><div class="pad">
           <p><b>Live now</b></p><ul class="ticks">
             <li>Page titles, descriptions and share images (<a href="#/website_pages">Page SEO</a>)</li>
-            <li>Product SEO title and description (<a href="#/products">Products</a>)</li>
+            <li>Product pages: summary, tags, brochure, photo gallery, spec table rows and key features (<a href="#/products">Products</a>)</li>
+            <li>Product SEO title and description</li>
             <li>FAQ answers used by site search and the chatbot (<a href="#/faqs">FAQs</a>, only ones with a page link)</li></ul>
-          <p class="muted"><b>Coming next</b>: product specs, features, photos and brochures; new product pages, category cards and menus; home-page banners, stats, gallery, certificates and investors. Until then, changes to those are saved here but not yet shown on the website.</p>
+          <p class="muted"><b>Not yet</b>: brand-new products (their page, category card and menu entry), long descriptions, adding or renaming spec sections, and home-page banners, stats, gallery, certificates and investors. Changes to those are saved here but not yet shown on the website. If something can't be applied, the publish result below says why.</p>
         </div></section>
       </div>
       <section class="panel"><div class="panel-h"><h2>Recent publishes</h2><button class="btn ghost sm" id="pubRefresh" type="button">${icon("refresh")} Refresh</button></div>
@@ -744,7 +745,7 @@
       try {
         const { runs } = await pubApi({ action: "status" });
         $("#pubSetup").innerHTML = "";
-        $("#runs").innerHTML = runs.length ? runs.map((r) => `<tr><td>${ago(r.created_at)}<small class="muted"> · ${new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</small></td><td>${esc((r.title || "").replace(/^Publish by /, "").replace(/ \(preview only\)$/, "") || "—")}${/preview/i.test(r.title || "") ? ' <small class="muted">(check only)</small>' : ""}</td><td>${label(r)}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">Details</a></td></tr>`).join("")
+        $("#runs").innerHTML = runs.length ? runs.map((r) => `<tr><td>${ago(r.created_at)}<small class="muted"> · ${new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</small></td><td>${esc((r.title || "").replace(/^Publish by /, "").replace(/ \(preview only\)$/, "") || "—")}${/preview/i.test(r.title || "") ? ' <small class="muted">(check only)</small>' : ""}</td><td>${label(r)}${r.result ? `<small class="runres">${esc(r.result).replace(/\n/g, "<br>")}</small>` : ""}${r.notes ? `<details class="runnotes"><summary>Notes (${r.notes.split("\n").length})</summary><small>${esc(r.notes).replace(/\n/g, "<br>")}</small></details>` : ""}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">Details</a></td></tr>`).join("")
           : `<tr><td colspan="4" class="muted pad">Nothing published from here yet.</td></tr>`;
         const real = runs.find((r) => r.status === "completed" && r.conclusion === "success" && !/preview/i.test(r.title || ""));
         lastDone = real ? real.created_at : null;

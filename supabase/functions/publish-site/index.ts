@@ -55,12 +55,27 @@ Deno.serve(async (req) => {
       if (r.status === 401 || r.status === 403) return json({ error: "GitHub refused the publish token. It may have expired.", setup: true }, 502);
       if (!r.ok) return json({ error: `GitHub said ${r.status}` }, 502);
       const d = await r.json();
-      return json({
-        runs: (d.workflow_runs || []).map((w: Record<string, unknown>) => ({
-          id: w.id, status: w.status, conclusion: w.conclusion, created_at: w.created_at, updated_at: w.updated_at,
-          url: w.html_url, title: w.display_title, event: w.event,
-        })),
-      });
+      const runs = (d.workflow_runs || []).map((w: Record<string, unknown>) => ({
+        id: w.id, status: w.status, conclusion: w.conclusion, created_at: w.created_at, updated_at: w.updated_at,
+        url: w.html_url, title: w.display_title, event: w.event, result: null as string | null, notes: null as string | null,
+      }));
+      // What each recent run did (the publish script writes it as GitHub annotations)
+      await Promise.all(runs.slice(0, 4).filter((w) => w.status === "completed").map(async (w) => {
+        try {
+          const j = await (await gh(`/actions/runs/${w.id}/jobs`)).json();
+          const job = j.jobs?.[0]; if (!job) return;
+          const path = `/check-runs/${job.id}/annotations`;
+          let a = await gh(path);
+          if (!a.ok) a = await fetch(`https://api.github.com/repos/${REPO}${path}`, { headers: { Accept: "application/vnd.github+json", "User-Agent": "pulse-admin" } });
+          if (!a.ok) return;
+          for (const x of await a.json()) {
+            if (x.title === "Publish result") w.result = x.message;
+            else if (x.title === "Publish notes") w.notes = x.message;
+            else if (x.annotation_level === "failure" && !w.result) w.result = x.message;
+          }
+        } catch { /* optional detail */ }
+      }));
+      return json({ runs });
     }
     return json({ error: "Unknown action." }, 400);
   } catch (e) {
