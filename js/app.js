@@ -196,12 +196,13 @@
     refreshBadges();
   }
   async function refreshBadges() {
-    const [a, b] = await Promise.all([
+    const [a, b, c] = await Promise.all([
       sb.from("enquiries").select("id", { count: "exact", head: true }).eq("status", "new"),
       sb.from("demo_requests").select("id", { count: "exact", head: true }).eq("status", "pending"),
+      sb.from("job_applications").select("id", { count: "exact", head: true }).eq("status", "new"),
     ]);
     const set = (k, n) => { const el = $(`[data-cnt="${k}"]`); if (el) el.textContent = n ? n : ""; };
-    set("enquiries", a.count); set("demo_requests", b.count);
+    set("enquiries", a.count); set("demo_requests", b.count); set("job_applications", c.count);
   }
   $("#menuBtn").addEventListener("click", () => document.body.classList.toggle("nav-open"));
   $("#scrim").addEventListener("click", () => document.body.classList.remove("nav-open"));
@@ -218,7 +219,7 @@
     const [k = "dashboard", id] = location.hash.replace(/^#\/?/, "").split("/");
     $$("#nav a").forEach((a) => a.classList.toggle("on", a.dataset.k === k));
     const main = $("#main"); main.innerHTML = `<div class="loading"><span class="spin"></span>Loading…</div>`; main.scrollTop = 0; window.scrollTo(0, 0);
-    const go = k === "dashboard" ? dashboard() : k === "enquiries" ? leads("enquiries") : k === "demo_requests" ? leads("demo_requests") : k === "team" ? team() : k === "publish" ? publish()
+    const go = k === "dashboard" ? dashboard() : k === "enquiries" ? leads("enquiries") : k === "demo_requests" ? leads("demo_requests") : k === "team" ? team() : k === "publish" ? publish() : k === "job_applications" ? jobs()
       : R[k] ? (id ? form(k, id === "new" ? null : id) : list(k)) : Promise.resolve(main.innerHTML = `<div class="empty"><h2>Page not found</h2><a class="btn" href="#/dashboard">Go to dashboard</a></div>`);
     Promise.resolve(go).catch((e) => { main.innerHTML = `<div class="empty"><h2>Couldn't load this page</h2><p>${esc(friendly(e))}</p><button class="btn" onclick="location.reload()">Try again</button></div>`; });
     document.title = (($(`#nav a[data-k="${k}"] span`) || {}).textContent || "Pulse") + " · Pulse Admin";
@@ -706,6 +707,114 @@
   }
   $("#dClose").addEventListener("click", () => $("#drawer").close());
   $("#drawer").addEventListener("click", (e) => { if (e.target.id === "drawer") $("#drawer").close(); });
+
+  /* ---------- job applications (career form) ---------- */
+  const JOB_STATUS = [["new", "New"], ["reviewing", "Reviewing"], ["shortlisted", "Shortlisted"], ["interview", "Interview"], ["hired", "Hired"], ["rejected", "Not selected"]];
+  async function openCv(r) {
+    if (!r.resume_path) return toast("No CV was uploaded with this application.", "err");
+    const { data, error } = await sb.storage.from("resumes").createSignedUrl(r.resume_path, 600, { download: r.resume_file_name || true });
+    if (error) return toast(friendly(error), "err");
+    window.open(data.signedUrl, "_blank", "noopener");
+  }
+  async function jobs() {
+    const key = "job_applications", main = $("#main");
+    const st = JSON.parse(sessionStorage.getItem("list:" + key) || "null") || { q: "", page: 0, status: "", role: "", from: "", to: "" };
+    const [counts, roles] = await Promise.all([
+      Promise.all(JOB_STATUS.map(([v]) => sb.from(key).select("id", { count: "exact", head: true }).eq("status", v))),
+      sb.from(key).select("applied_role").not("applied_role", "is", null).limit(2000),
+    ]);
+    const roleList = [...new Set((roles.data || []).map((r) => r.applied_role).filter(Boolean))].sort();
+    main.innerHTML = `
+      <header class="ph"><div><h1>Job Applications</h1><p class="muted" id="lcount"> </p></div><div class="row"><button class="btn ghost" id="refresh">${icon("refresh")} Refresh</button><button class="btn ghost" id="csv">${icon("download")} Export CSV</button></div></header>
+      <div class="tabs" role="tablist"><button data-s="" class="${!st.status ? "on" : ""}">All</button>${JOB_STATUS.map(([v, l], i) => `<button data-s="${v}" class="${st.status === v ? "on" : ""}">${l}<b>${counts[i].count || 0}</b></button>`).join("")}</div>
+      <div class="toolbar"><label class="search">${icon("search")}<input type="search" id="q" placeholder="Search name, phone, email, role…" value="${esc(st.q)}"></label>
+        <select id="roleF" aria-label="Role"><option value="">All roles</option>${roleList.map((v) => `<option ${st.role === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>
+        <label class="date">From <input type="date" id="fromF" value="${esc(st.from)}"></label><label class="date">To <input type="date" id="toF" value="${esc(st.to)}"></label></div>
+      <div class="tablewrap"><table class="tbl leads"><thead><tr><th>Applicant</th><th>Contact</th><th>Applied for</th><th>Experience</th><th>Received</th><th>CV</th><th>Status</th></tr></thead><tbody id="rows"><tr><td colspan="7" class="loading"><span class="spin"></span>Loading…</td></tr></tbody></table></div>
+      <div class="pager" id="pager"></div>`;
+    const save = () => sessionStorage.setItem("list:" + key, JSON.stringify(st));
+    const build = (opt) => {
+      let q = sb.from(key).select("*", opt).order("created_at", { ascending: false });
+      if (st.status) q = q.eq("status", st.status);
+      if (st.role) q = q.eq("applied_role", st.role);
+      if (st.from) q = q.gte("created_at", st.from);
+      if (st.to) q = q.lt("created_at", new Date(new Date(st.to).getTime() + 864e5).toISOString().slice(0, 10));
+      if (st.q) q = q.or(["name", "email", "phone", "applied_role", "job_title"].map((c) => `${c}.ilike.%${st.q.replace(/[%,()]/g, " ")}%`).join(","));
+      return q;
+    };
+    let rows = [];
+    const statusSel = (r) => `<select class="st s-${esc(r.status)}" data-st="${r.id}" aria-label="Status">${JOB_STATUS.map(([v, l]) => `<option value="${v}" ${r.status === v ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+    async function load() {
+      const { data, error, count } = await build({ count: "exact" }).range(st.page * PAGE, st.page * PAGE + PAGE - 1);
+      if (error) { $("#rows").innerHTML = `<tr><td colspan="7" class="err">${esc(friendly(error))}</td></tr>`; return; }
+      rows = data; $("#lcount").textContent = `${count} ${count === 1 ? "application" : "applications"}`;
+      $("#rows").innerHTML = data.length ? data.map((r) => `<tr tabindex="0" data-id="${r.id}" class="${r.status === "new" ? "unread" : ""}">
+          <td><b>${esc(r.name)}</b><small>${esc(r.job_title || "")}</small></td>
+          <td>${r.phone ? `<a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>` : ""}<small>${esc(r.email || "")}</small></td>
+          <td>${esc(r.applied_role || "—")}</td>
+          <td>${esc(r.years_experience ? r.years_experience + (/^\d+(\.\d+)?$/.test(r.years_experience.trim()) ? " yrs" : "") : "—")}</td>
+          <td class="muted" title="${esc(fmtDT(r.created_at))}">${ago(r.created_at)}</td>
+          <td>${r.resume_path ? `<button type="button" class="btn ghost sm" data-cv="${r.id}">${icon("download")} CV</button>` : '<span class="muted">—</span>'}</td>
+          <td>${statusSel(r)}</td></tr>`).join("")
+        : `<tr><td colspan="7"><div class="empty sm"><p>${st.q || st.status || st.role || st.from || st.to ? "No applications match." : "No applications yet. They appear here as soon as someone applies on the Careers form."}</p></div></td></tr>`;
+      $$("#rows tr[data-id]").forEach((tr) => { const open = (e) => { if (e.target.closest("select,a,button")) return; jobDrawer(rows.find((x) => x.id === tr.dataset.id), load); }; tr.addEventListener("click", open); tr.addEventListener("keydown", (e) => e.key === "Enter" && open(e)); });
+      pager(count, st, load, save);
+    }
+    $("#rows").addEventListener("click", (e) => { const b = e.target.closest("[data-cv]"); if (b) openCv(rows.find((x) => x.id === b.dataset.cv)); });
+    $("#rows").addEventListener("change", async (e) => {
+      const s = e.target.closest("[data-st]"); if (!s) return;
+      const { error } = await sb.from(key).update({ status: s.value, reviewed_by: S.me.id }).eq("id", s.dataset.st);
+      if (error) return toast(friendly(error), "err");
+      const row = rows.find((x) => x.id === s.dataset.st); if (row) row.status = s.value;
+      s.className = "st s-" + s.value; s.closest("tr").classList.remove("unread"); toast("Status updated"); refreshBadges();
+    });
+    $$(".tabs button").forEach((b) => b.addEventListener("click", () => { st.status = b.dataset.s; st.page = 0; save(); $$(".tabs button").forEach((x) => x.classList.toggle("on", x === b)); load(); }));
+    $("#q").addEventListener("input", debounce((e) => { st.q = e.target.value.trim(); st.page = 0; save(); load(); }));
+    $("#roleF").addEventListener("change", (e) => { st.role = e.target.value; st.page = 0; save(); load(); });
+    $("#fromF").addEventListener("change", (e) => { st.from = e.target.value; st.page = 0; save(); load(); });
+    $("#toF").addEventListener("change", (e) => { st.to = e.target.value; st.page = 0; save(); load(); });
+    $("#refresh").addEventListener("click", () => { load(); refreshBadges(); });
+    $("#csv").addEventListener("click", async () => {
+      const { data, error } = await build().limit(5000);
+      if (error) return toast(friendly(error), "err");
+      const cols = ["created_at", "name", "phone", "email", "applied_role", "job_title", "years_experience", "status", "message", "notes", "resume_file_name"];
+      const cellv = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const csv = [cols.join(","), ...data.map((r) => cols.map((c) => cellv(r[c])).join(","))].join("\r\n");
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv" })); a.download = `pulse-job-applications-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
+      toast(`Exported ${data.length} rows`);
+    });
+    await load();
+  }
+  function jobDrawer(r, reload) {
+    const d = $("#drawer");
+    const line = (l, v) => v ? `<div class="kv"><span>${l}</span><b>${esc(v)}</b></div>` : "";
+    const wa = r.phone ? `https://wa.me/${waNum(r.phone)}?text=${encodeURIComponent(`Hi ${r.name}, this is Pulse. Thank you for applying${r.applied_role ? " for the " + r.applied_role + " role" : ""}.`)}` : "";
+    $("#dBody").innerHTML = `
+      <h2>${esc(r.name)}</h2><p class="muted">${esc([r.job_title, r.years_experience && r.years_experience + (/^\d+(\.\d+)?$/.test(r.years_experience.trim()) ? " yrs experience" : "")].filter(Boolean).join(" · "))}</p>
+      <div class="act">${r.resume_path ? `<button class="btn sm" id="dCv" type="button">${icon("download")} Open CV</button>` : ""}${r.phone ? `<a class="btn ghost sm" href="${wa}" target="_blank" rel="noopener">${icon("wa")} WhatsApp</a><a class="btn ghost sm" href="tel:${esc(r.phone)}">${icon("phone")} Call</a>` : ""}${r.email ? `<a class="btn ghost sm" href="mailto:${esc(r.email)}?subject=${encodeURIComponent("Your application at Pulse" + (r.applied_role ? " – " + r.applied_role : ""))}">${icon("mail")} Email</a>` : ""}</div>
+      ${r.message ? `<div class="msg">${esc(r.message)}</div>` : ""}
+      ${line("Applied for", r.applied_role)}${line("Current role / skills", r.job_title)}${line("Experience", r.years_experience)}${line("Phone", r.phone)}${line("Email", r.email)}
+      ${line("CV file", r.resume_path ? r.resume_file_name || "Uploaded" : "Not uploaded (check the Google Sheet)")}${line("Received", fmtDT(r.created_at))}${line("Applied from", r.source_page)}
+      <div class="field" style="margin-top:14px"><label for="jStatus">Status</label><select id="jStatus">${JOB_STATUS.map(([v, l]) => `<option value="${v}" ${r.status === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+      <div class="field" style="margin-top:12px"><label for="jNotes">Internal notes</label><textarea id="jNotes" rows="4" placeholder="Interview feedback, salary expectation, next step… (only admins see this)">${esc(r.notes || "")}</textarea></div>
+      <div class="row" style="margin-top:12px"><button class="btn sm" id="jSave" type="button">Save</button></div>
+      <button class="btn ghost danger sm" id="dDel">${icon("trash")} Delete application</button>`;
+    d.showModal();
+    $("#dCv")?.addEventListener("click", () => openCv(r));
+    $("#jSave").onclick = async () => {
+      const upd = { status: $("#jStatus").value, notes: $("#jNotes").value.trim() || null, reviewed_by: S.me.id };
+      const { error } = await sb.from("job_applications").update(upd).eq("id", r.id);
+      if (error) return toast(friendly(error), "err");
+      Object.assign(r, upd); toast("Saved"); reload(); refreshBadges();
+    };
+    $("#dDel").onclick = async () => {
+      if (!(await confirmBox("Delete this application?", "The application and its CV will be removed permanently."))) return;
+      const { error } = await sb.from("job_applications").delete().eq("id", r.id);
+      if (error) return toast(friendly(error), "err");
+      if (r.resume_path) await sb.storage.from("resumes").remove([r.resume_path]).catch(() => null);
+      d.close(); toast("Deleted"); reload(); refreshBadges();
+    };
+  }
 
   /* ---------- publish to website ---------- */
   const pubApi = async (body) => {

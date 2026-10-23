@@ -185,7 +185,7 @@
 
   window.NAV = [
     { group: "Overview", items: [["dashboard", "Dashboard", "home"]] },
-    { group: "Leads", items: [["enquiries", "Enquiries", "inbox"], ["demo_requests", "Demo Requests", "calendar"]] },
+    { group: "Leads", items: [["enquiries", "Enquiries", "inbox"], ["demo_requests", "Demo Requests", "calendar"], ["job_applications", "Job Applications", "users"]] },
     { group: "Catalogue", items: [["products", "Products", "box"], ["categories", "Categories", "grid"], ["product_types", "Product Types", "tag"], ["applications", "Applications", "layers"], ["certifications", "Product Certifications", "award"]] },
     { group: "Website", items: [["publish", "Publish to website", "up"], ["banners", "Banners", "image"], ["faqs", "FAQs", "help"], ["site_stats", "Site Stats", "bar"], ["facility_gallery", "Facility Gallery", "camera"], ["company_certifications", "Company Certificates", "award"], ["company_partners", "Partners & Investors", "users"], ["website_pages", "Page SEO", "file"]] },
     { group: "Network", items: [["distributors", "Distributors", "truck"], ["countries", "Countries", "globe"]] },
