@@ -29,6 +29,7 @@
         { name: "category_id", label: "Category", type: "fk", table: "categories", required: true },
         { name: "product_type_id", label: "Product type", type: "fk", table: "product_types", filterBy: "category_id" },
         { name: "status", label: "Status", type: "select", options: [["active", "Active (on website)"], ["draft", "Draft"], ["inactive", "Inactive"]], default: "draft" },
+        { name: "create_page", label: "Create a page on the website", type: "bool", help: "For new products. On the next Publish, a full product page is made and added to its category page, the menu, site search and the sitemap. Needs: Status Active, a short description (40+ characters), at least one photo, and 3 key features or 2 spec rows. Leave off for test products." },
         { name: "short_description", label: "Short description", type: "textarea", rows: 2, max: 200 },
         { name: "description", label: "Full description", type: "textarea", rows: 6 },
         { name: "featured_image", label: "Main image", type: "image", minWidth: 800, help: "Square or 4:3 photo on a plain background, at least 800 px wide. The first gallery photo becomes the main image automatically." },

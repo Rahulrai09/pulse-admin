@@ -835,8 +835,9 @@
             <li>Page titles, descriptions and share images (<a href="#/website_pages">Page SEO</a>)</li>
             <li>Product pages: summary, tags, brochure, photo gallery, spec table rows and key features (<a href="#/products">Products</a>)</li>
             <li>Product SEO title and description</li>
-            <li>FAQ answers used by site search and the chatbot (<a href="#/faqs">FAQs</a>, only ones with a page link)</li></ul>
-          <p class="muted"><b>Not yet</b>: brand-new products (their page, category card and menu entry), long descriptions, adding or renaming spec sections, and home-page banners, stats, gallery, certificates and investors. Changes to those are saved here but not yet shown on the website. If something can't be applied, the publish result below says why.</p>
+            <li>FAQ answers used by site search and the chatbot (<a href="#/faqs">FAQs</a>, only ones with a page link)</li>
+            <li><b>New products</b>: tick <b>Create a page on the website</b> on an Active product, and Publish makes its page and adds it to the category page, menu, site search and sitemap</li></ul>
+          <p class="muted"><b>Not yet</b>: long descriptions, adding or renaming spec sections, and home-page banners, stats, gallery, certificates and investors. Changes to those are saved here but not yet shown on the website. If something can't be applied, the publish result below says why.</p>
         </div></section>
       </div>
       <section class="panel"><div class="panel-h"><h2>Recent publishes</h2><button class="btn ghost sm" id="pubRefresh" type="button">${icon("refresh")} Refresh</button></div>
