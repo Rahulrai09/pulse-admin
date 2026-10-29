@@ -863,6 +863,7 @@
           <p class="muted"><b>Not yet</b>: long descriptions, adding or renaming spec sections, and home-page banners, stats, gallery, certificates and investors. Changes to those are saved here but not yet shown on the website. If something can't be applied, the publish result below says why.</p>
         </div></section>
       </div>
+      <section class="panel"><div class="panel-h"><h2>New product pages</h2></div><div id="newPages" class="pad"><span class="spin sm"></span> Checking…</div></section>
       <section class="panel"><div class="panel-h"><h2>Recent publishes</h2><button class="btn ghost sm" id="pubRefresh" type="button">${icon("refresh")} Refresh</button></div>
         <div class="tablewrap flat"><table class="tbl"><thead><tr><th>Started</th><th>By</th><th>Result</th><th></th></tr></thead><tbody id="runs"><tr><td colspan="4" class="loading"><span class="spin"></span>Loading…</td></tr></tbody></table></div></section>`;
     const setupBox = () => { $("#pubSetup").innerHTML = `<section class="panel warnbox"><div class="pad"><h2>One-time setup: connect publishing to GitHub</h2><ol class="steps">
@@ -904,6 +905,33 @@
         : items.length ? `<ul class="feed">${items.slice(0, 12).map(([t, id, n, d, k]) => `<li><a href="#/${t}/${id}"><div><b>${esc(n)}</b><small>${k}</small></div><div class="r"><small>${ago(d)}</small></div></a></li>`).join("")}</ul>${items.length > 12 ? `<p class="muted">…and ${items.length - 12} more</p>` : ""}`
         : `<p class="muted">Nothing edited since the last publish. The website is up to date.</p>`;
     }
+    // Products with "Create a page on the website" switched on: live, ready for the next publish, or what is missing.
+    // Same rules as the publisher (scripts/admin-publish/newpages.mjs: placement + missing).
+    async function loadNewPages() {
+      const FOLDER = { "critical-care": "critical-care", "renal-care": "renal-care", "cardiac-care": "cardiac-care", aesthetics: "aesthetics", "ivd-diagnostics": "ivd-diagnostics", "hospital-setup": "hospital-setup", surgical: "surgical-care" };
+      const { data, error } = await sb.from("products").select("id,name,slug,status,short_description,featured_image,specifications,categories(slug,name),product_images(image_url)").eq("create_page", true).order("updated_at", { ascending: false });
+      const box = $("#newPages");
+      if (error) { box.innerHTML = `<p class="err">${esc(friendly(error))}</p>`; return; }
+      if (!data.length) { box.innerHTML = `<p class="muted">No products are waiting for a page. To add one, open a product and switch on <b>Create a page on the website</b>.</p>`; return; }
+      let live = null;
+      try { const r = await fetch("https://raw.githubusercontent.com/Rahulrai09/pulse-website/main/sitemap.xml", { cache: "no-store" }); if (r.ok) live = await r.text(); } catch (_) {}
+      const rows = data.map((p) => {
+        const folder = FOLDER[p.categories?.slug], url = folder ? `/${folder}/${p.slug}/` : null, s = p.specifications || {};
+        const need = [];
+        if (p.status !== "active") need.push("status Active");
+        if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(p.slug || "")) need.push("a valid URL slug");
+        if (!folder) need.push(`a category with a website section ("${p.categories?.name || "none"}" has none)`);
+        if ((p.short_description || "").trim().length < 40) need.push(`a short description of 40+ characters (now ${(p.short_description || "").trim().length})`);
+        if (!(p.product_images || []).some((i) => i.image_url) && !p.featured_image) need.push("at least one photo");
+        if ((s.features || []).filter(Boolean).length < 3 && (s.specs || []).filter((x) => x?.label && x?.value).length < 2) need.push("3 key features or 2 spec rows");
+        const isLive = live && url && live.includes(`<loc>https://www.pulseio.in${url}</loc>`);
+        const state = isLive ? `<span class="badge s-active">Live</span> <a href="https://www.pulseio.in${url}" target="_blank" rel="noopener">View page</a>`
+          : need.length ? `<span class="badge s-lost">Not ready</span><small>Still needed: ${esc(need.join("; "))}</small>`
+          : `<span class="badge s-pending">Ready</span><small>The page is created on the next Publish now${url ? `, at pulseio.in${esc(url)}` : ""}.</small>`;
+        return `<li><a href="#/products/${p.id}"><b>${esc(p.name)}</b><small>${esc(p.categories?.name || "No category")}</small></a><div class="np">${state}</div></li>`;
+      }).join("");
+      box.innerHTML = `<ul class="nplist">${rows}</ul>${live === null ? `<p class="muted"><small>Couldn't check which pages are already live; "Ready" may include pages that already exist.</small></p>` : ""}`;
+    }
     const start = async (dry) => {
       const b = dry ? $("#pubPreview") : $("#pubNow");
       if (!dry && !(await confirmBox("Publish to the website?", "Your saved admin changes will go live on pulseio.in in about 1–2 minutes.", "Publish"))) return;
@@ -914,8 +942,8 @@
     };
     $("#pubNow").onclick = () => start(false);
     $("#pubPreview").onclick = () => start(true);
-    $("#pubRefresh").onclick = () => loadRuns().then(loadPending);
-    await loadRuns(); await loadPending();
+    $("#pubRefresh").onclick = () => loadRuns().then(loadPending).then(loadNewPages);
+    await loadRuns(); await loadPending(); await loadNewPages();
   }
 
   /* ---------- team ---------- */
