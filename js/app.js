@@ -685,6 +685,29 @@
     });
     await load();
   }
+  /* Lead message → labelled facts, free text and (for chat leads) the conversation as bubbles, in order. */
+  function fmtMsg(m) {
+    const facts = [], text = [], chat = []; let imported = false;
+    String(m).split("\n").forEach((ln) => {
+      const s = ln.trim(); if (!s) return;
+      if (/^\(Imported from/i.test(s)) { imported = true; return; }
+      if (/^(Bot|You):/.test(s) || (s.includes("||") && /(Bot|You):/.test(s))) {
+        s.split(/\s*\|\|\s*/).forEach((part) => {
+          const mm = part.match(/^(Bot|You):\s*([\s\S]*)$/);
+          if (mm && mm[2].trim()) chat.push([mm[1], mm[2].trim()]); else if (part.trim()) chat.push(["Bot", part.trim()]);
+        });
+        return;
+      }
+      const kv = s.match(/^([A-Z][A-Za-z /]{1,28}):\s+(.+)$/);
+      if (kv) facts.push([kv[1], kv[2]]); else text.push(s);
+    });
+    const val = (v) => /^https?:\/\/\S+$/.test(v) ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v.replace(/^https?:\/\/(www\.)?/, ""))}</a>` : esc(v);
+    return `<div class="msgx">
+      ${text.length ? `<div class="msgtext">${esc(text.join("\n"))}</div>` : ""}
+      ${facts.length ? `<div class="facts">${facts.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><b>${val(v)}</b></div>`).join("")}</div>` : ""}
+      ${chat.length ? `<div class="chat-h">Conversation <small>${chat.length} messages</small></div><div class="chat">${chat.map(([w, s]) => `<div class="b ${w === "You" ? "you" : "bot"}"><i>${w === "You" ? "Visitor" : "Pulse bot"}</i>${esc(s)}</div>`).join("")}</div>` : ""}
+      ${imported ? `<p class="imp">Imported from the Pulse Website Leads sheet</p>` : ""}</div>`;
+  }
   function drawer(key, r) {
     const d = $("#drawer"), isEnq = key === "enquiries";
     const line = (l, v) => v ? `<div class="kv"><span>${l}</span><b>${esc(v)}</b></div>` : "";
@@ -692,7 +715,7 @@
     $("#dBody").innerHTML = `
       <h2>${esc(r.name)}</h2><p class="muted">${esc(r.company || "")}</p>
       <div class="act">${r.phone ? `<a class="btn sm" href="${wa}" target="_blank" rel="noopener">${icon("wa")} WhatsApp</a><a class="btn ghost sm" href="tel:${esc(r.phone)}">${icon("phone")} Call</a>` : ""}${r.email ? `<a class="btn ghost sm" href="mailto:${esc(r.email)}">${icon("mail")} Email</a>` : ""}</div>
-      ${r.message ? `<div class="msg">${esc(r.message)}</div>` : ""}
+      ${r.message ? fmtMsg(r.message) : ""}
       ${line("Product", r.products?.name)}${line("Phone", r.phone)}${line("Email", r.email)}${line("Customer type", r.customer_type && human(r.customer_type))}${line("Source", r.source)}
       ${line("City", [r.city, r.state, r.country].filter(Boolean).join(", "))}${line("Location", r.location)}${line("Preferred date", r.preferred_date && fmtDate(r.preferred_date))}
       ${line("Assigned to", r.assignee?.full_name)}${line("Received", fmtDT(r.created_at))}

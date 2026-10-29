@@ -204,3 +204,18 @@ dialog { border: 0; padding: 0; color: inherit; } dialog::backdrop { background:
 /* job application statuses */
 .s-reviewing { background: #dbeafe; color: #1e40af; } .s-shortlisted { background: #ede9fe; color: #5b21b6; }
 .s-interview { background: #fef9c3; color: #854d0e; } .s-hired { background: #dcfce7; color: #166534; } .s-rejected { background: #f1f2f5; color: #6b7280; }
+
+/* lead message: facts, text, chat bubbles */
+.msgx { margin-bottom: 16px; }
+.msgx .facts { background: var(--soft); border-radius: 10px; padding: 2px 14px; margin-bottom: 12px; }
+.msgx .facts .kv { grid-template-columns: 120px 1fr; }
+.msgx .facts .kv:last-child { border-bottom: 0; }
+.msgx .facts a { color: var(--blue); }
+.msgx .msgtext { background: var(--soft); border-radius: 10px; padding: 14px; white-space: pre-wrap; margin-bottom: 12px; line-height: 1.5; }
+.msgx .chat-h { font-weight: 600; margin: 4px 0 8px; } .msgx .chat-h small { display: inline; color: var(--muted); font-weight: 400; margin-left: 6px; }
+.msgx .chat { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--soft); border-radius: 10px; }
+.msgx .chat .b { max-width: 85%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.msgx .chat .b i { display: block; font-style: normal; font-size: 11px; font-weight: 600; opacity: .7; margin-bottom: 2px; }
+.msgx .chat .bot { align-self: flex-start; background: #fff; border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.msgx .chat .you { align-self: flex-end; background: var(--navy); color: #fff; border-bottom-right-radius: 4px; }
+.msgx .imp { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
