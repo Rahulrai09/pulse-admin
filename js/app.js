@@ -216,7 +216,7 @@
   function route() {
     lastHash = location.hash;
     document.body.classList.remove("nav-open");
-    const [k = "dashboard", id] = location.hash.replace(/^#\/?/, "").split("/");
+    const [k0, id] = location.hash.replace(/^#\/?/, "").split("/"); const k = k0 || "dashboard"; // plain address (no #/page) opens the dashboard
     $$("#nav a").forEach((a) => a.classList.toggle("on", a.dataset.k === k));
     const main = $("#main"); main.innerHTML = `<div class="loading"><span class="spin"></span>Loading…</div>`; main.scrollTop = 0; window.scrollTo(0, 0);
     const go = k === "dashboard" ? dashboard() : k === "enquiries" ? leads("enquiries") : k === "demo_requests" ? leads("demo_requests") : k === "team" ? team() : k === "publish" ? publish() : k === "job_applications" ? jobs()
